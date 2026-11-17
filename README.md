@@ -83,4 +83,4 @@ python -m pytest -q
 - **Incorrect AI query**: open "Show generated SQL" to see the exact calculation, and ask a more specific question.
 
 - ## Author
-- ### Hitesh Sharma
+- # Hitesh Sharma

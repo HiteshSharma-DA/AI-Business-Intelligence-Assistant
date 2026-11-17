@@ -81,3 +81,6 @@ python -m pytest -q
 - **API error/quota**: check your key, internet connection, and API usage limits.
 - **Wrong columns/types**: check the CSV header, delimiter selection, and original data encoding.
 - **Incorrect AI query**: open "Show generated SQL" to see the exact calculation, and ask a more specific question.
+
+- ## Author
+- ### Hitesh Sharma

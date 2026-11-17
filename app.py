@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import datetime as dt
+import threading
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -14,6 +16,46 @@ st.markdown("""<style>
 .block-container {padding-top: 2rem;}
 div[data-testid="stMetric"] {border: 1px solid rgba(128,128,128,.25); padding: 12px; border-radius: 12px;}
 </style>""", unsafe_allow_html=True)
+
+
+# The key is configured ONLY in Streamlit Cloud Secrets, not in GitHub or the UI.
+# This is a small public demo; limits are best-effort in-memory limits.
+PUBLIC_MODEL = "gemini-3.5-flash-lite"
+MAX_QUESTIONS_PER_SESSION_PER_DAY = 5
+MAX_QUESTIONS_PER_APP_PER_DAY = 25
+
+
+def configured_api_key() -> str:
+    try:
+        return str(st.secrets.get("GEMINI_API_KEY", "")).strip()
+    except (FileNotFoundError, KeyError):
+        return ""
+
+
+@st.cache_resource
+def usage_counter():
+    """Shared between Streamlit sessions in this server process."""
+    return {"date": "", "count": 0, "lock": threading.Lock()}
+
+
+def reserve_question_slot() -> bool:
+    """Limit public usage per session and per process (not a hard billing cap)."""
+    today = dt.datetime.now(dt.timezone.utc).date().isoformat()
+    counter = usage_counter()
+    with counter["lock"]:
+        if counter["date"] != today:
+            counter["date"] = today
+            counter["count"] = 0
+        session_usage = st.session_state.get("ai_usage", {"date": today, "count": 0})
+        if session_usage["date"] != today:
+            session_usage = {"date": today, "count": 0}
+        if (counter["count"] >= MAX_QUESTIONS_PER_APP_PER_DAY
+                or session_usage["count"] >= MAX_QUESTIONS_PER_SESSION_PER_DAY):
+            return False
+        counter["count"] += 1
+        session_usage["count"] += 1
+        st.session_state.ai_usage = session_usage
+        return True
 
 
 def client_for_key(api_key: str):
@@ -94,10 +136,13 @@ st.caption("Upload a business CSV. Ask a question in English. Get an answer calc
 
 with st.sidebar:
     st.subheader("AI settings")
-    api_key = st.text_input("Gemini API key", type="password",
-                            help="Your key is used for this browser session; it is not saved in the project files.")
-    model = st.text_input("Gemini model", value="gemini-2.5-flash")
-    st.caption("No .env file required. Do not enter your key into a shared public app.")
+    api_key = configured_api_key()
+    model = PUBLIC_MODEL
+    if api_key:
+        st.success("AI is ready — no API key needed from visitors.")
+    else:
+        st.warning("AI setup pending: the app owner must configure the key in Streamlit Cloud Secrets.")
+    st.caption(f"Demo limit: {MAX_QUESTIONS_PER_SESSION_PER_DAY} questions per session per UTC day. Availability depends on shared quota.")
     st.divider()
     delimiter = st.selectbox("CSV delimiter", ["Auto detect", "Comma", "Semicolon", "Tab", "Pipe"])
     st.info("Data stays in this app's Python process. Gemini receives column names, your question, "
@@ -165,8 +210,10 @@ with ask:
     if submitted:
         if not question.strip():
             st.warning("Type your question first.")
-        elif not api_key.strip():
-            st.warning("Enter your Gemini API key in the sidebar to ask AI questions.")
+        elif not api_key:
+            st.warning("AI is not configured yet. The app owner needs to set GEMINI_API_KEY in Streamlit Cloud Secrets.")
+        elif not reserve_question_slot():
+            st.warning("The public demo limit has been reached for today. Please try later.")
         else:
             try:
                 with st.spinner("Analyzing your CSV..."):
